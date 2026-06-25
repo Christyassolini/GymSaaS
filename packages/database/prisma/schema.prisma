@@ -1,0 +1,480 @@
+// GymSaaS — Schema Prisma
+// Banco: MySQL 8+
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ==============================================
+// MULTI-TENANCY: GRUPO / FRANQUIA
+// ==============================================
+
+model Group {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  logoUrl     String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  gyms        Gym[]
+  users       User[]
+  plans       Plan[]
+
+  @@map("groups")
+}
+
+// ==============================================
+// ACADEMIA / UNIDADE
+// ==============================================
+
+model Gym {
+  id          String   @id @default(cuid())
+  groupId     String
+  name        String
+  slug        String   @unique
+  cnpj        String?  @unique
+  phone       String?
+  email       String?
+  logoUrl     String?
+  active      Boolean  @default(true)
+
+  // Endereço
+  street      String?
+  number      String?
+  complement  String?
+  district    String?
+  city        String
+  state       String
+  zipCode     String?
+
+  // Configurações de notificação
+  notifyEmail    Boolean @default(true)
+  notifyWhatsapp Boolean @default(false)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  group       Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  users       User[]
+  students    Student[]
+  classes     Class[]
+  payments    Payment[]
+  cashFlows   CashFlow[]
+  exercises   Exercise[]
+
+  @@map("gyms")
+}
+
+// ==============================================
+// USUÁRIOS (STAFF)
+// ==============================================
+
+model User {
+  id          String   @id @default(cuid())
+  groupId     String?
+  gymId       String?
+  name        String
+  email       String   @unique
+  phone       String?
+  role        UserRole @default(RECEPTIONIST)
+  active      Boolean  @default(true)
+  avatarUrl   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Better Auth fields
+  emailVerified Boolean  @default(false)
+  image         String?
+
+  group       Group?        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  gym         Gym?          @relation(fields: [gymId], references: [id])
+  sessions    Session[]
+  accounts    Account[]
+  workouts    Workout[]     @relation("CreatedWorkouts")
+  classes     Class[]       @relation("TrainerClasses")
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  FINANCIAL
+  PERSONAL_TRAINER
+  RECEPTIONIST
+}
+
+// ==============================================
+// BETTER AUTH — Sessions e Accounts
+// ==============================================
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  userId                String
+  accountId             String
+  providerId            String
+  accessToken           String?   @db.Text
+  refreshToken          String?   @db.Text
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  idToken               String?   @db.Text
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("accounts")
+}
+
+model Verification {
+  id         String    @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@map("verifications")
+}
+
+// ==============================================
+// ALUNOS
+// ==============================================
+
+model Student {
+  id          String   @id @default(cuid())
+  gymId       String
+
+  // Etapa 1 — obrigatória
+  name        String
+  cpf         String   @unique
+  birthDate   DateTime
+  phone       String
+  email       String?
+
+  // Endereço
+  street      String?
+  number      String?
+  complement  String?
+  district    String?
+  city        String?
+  state       String?
+  zipCode     String?
+
+  // Etapa 2 — opcional
+  height      Float?   // em cm
+  weight      Float?   // em kg
+  injuries    String?  @db.Text
+  restrictions String? @db.Text
+  medicalNotes String? @db.Text
+  photoUrl    String?
+
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  gym             Gym             @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  subscriptions   Subscription[]
+  payments        Payment[]
+  workouts        Workout[]
+  classEnrollments ClassEnrollment[]
+
+  @@map("students")
+}
+
+// ==============================================
+// PLANOS
+// ==============================================
+
+model Plan {
+  id            String       @id @default(cuid())
+  groupId       String
+  name          String       // ex: "Mensal", "Trimestral", "Anual"
+  description   String?
+  durationDays  Int          // duração em dias (30, 90, 365...)
+  active        Boolean      @default(true)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  group         Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  prices        PlanPrice[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+// Preço do plano por unidade (pode variar entre academias)
+model PlanPrice {
+  id        String   @id @default(cuid())
+  planId    String
+  gymId     String
+  price     Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  plan      Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, gymId])
+  @@map("plan_prices")
+}
+
+// ==============================================
+// ASSINATURAS
+// ==============================================
+
+model Subscription {
+  id          String             @id @default(cuid())
+  studentId   String
+  planId      String
+  startDate   DateTime
+  endDate     DateTime
+  status      SubscriptionStatus @default(ACTIVE)
+  price       Decimal            @db.Decimal(10, 2)
+  notes       String?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  student     Student    @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  plan        Plan       @relation(fields: [planId], references: [id])
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+// ==============================================
+// FINANCEIRO — PAGAMENTOS
+// ==============================================
+
+model Payment {
+  id              String        @id @default(cuid())
+  gymId           String
+  studentId       String
+  amount          Decimal       @db.Decimal(10, 2)
+  dueDate         DateTime
+  paidAt          DateTime?
+  status          PaymentStatus @default(PENDING)
+  method          PaymentMethod?
+  description     String?
+  receiptUrl      String?
+
+  // Asaas integration
+  asaasPaymentId  String?       @unique
+  asaasInvoiceUrl String?
+  asaasPixCode    String?       @db.Text
+  asaasBoletoCode String?       @db.Text
+
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  gym             Gym           @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  student         Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentMethod {
+  BOLETO
+  PIX
+  CREDIT_CARD
+  DEBIT_CARD
+  CASH
+  MACHINE
+}
+
+// ==============================================
+// FLUXO DE CAIXA
+// ==============================================
+
+model CashFlow {
+  id          String          @id @default(cuid())
+  gymId       String
+  type        CashFlowType
+  amount      Decimal         @db.Decimal(10, 2)
+  description String
+  category    String?
+  date        DateTime
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  gym         Gym             @relation(fields: [gymId], references: [id], onDelete: Cascade)
+
+  @@map("cash_flows")
+}
+
+enum CashFlowType {
+  INCOME
+  EXPENSE
+}
+
+// ==============================================
+// AULAS
+// ==============================================
+
+model Class {
+  id          String    @id @default(cuid())
+  gymId       String
+  trainerId   String?
+  name        String
+  type        ClassType
+  description String?
+  maxStudents Int?      // null = individual (sem limite)
+  scheduledAt DateTime
+  durationMin Int       @default(60)
+  location    String?
+  cancelled   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  gym         Gym               @relation(fields: [gymId], references: [id], onDelete: Cascade)
+  trainer     User?             @relation("TrainerClasses", fields: [trainerId], references: [id])
+  enrollments ClassEnrollment[]
+
+  @@map("classes")
+}
+
+enum ClassType {
+  INDIVIDUAL
+  GROUP
+}
+
+model ClassEnrollment {
+  id          String           @id @default(cuid())
+  classId     String
+  studentId   String
+  attended    Boolean          @default(false)
+  enrolledAt  DateTime         @default(now())
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  class       Class            @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student     Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([classId, studentId])
+  @@map("class_enrollments")
+}
+
+// ==============================================
+// TREINOS
+// ==============================================
+
+model Exercise {
+  id           String   @id @default(cuid())
+  gymId        String?  // null = exercício global
+  name         String
+  description  String?  @db.Text
+  muscleGroup  String?
+  videoUrl     String?
+  imageUrl     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  gym          Gym?               @relation(fields: [gymId], references: [id])
+  workoutItems WorkoutItem[]
+
+  @@map("exercises")
+}
+
+model Workout {
+  id          String      @id @default(cuid())
+  studentId   String
+  createdById String
+  name        String
+  description String?
+  active      Boolean     @default(true)
+  startDate   DateTime?
+  endDate     DateTime?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  student     Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  createdBy   User        @relation("CreatedWorkouts", fields: [createdById], references: [id])
+  items       WorkoutItem[]
+
+  @@map("workouts")
+}
+
+model WorkoutItem {
+  id           String   @id @default(cuid())
+  workoutId    String
+  exerciseId   String
+  sets         Int
+  reps         String   // ex: "12", "8-12", "até a falha"
+  weight       String?  // ex: "10kg", "corporal"
+  restSeconds  Int?
+  notes        String?
+  order        Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workout      Workout  @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  exercise     Exercise @relation(fields: [exerciseId], references: [id])
+
+  @@map("workout_items")
+}
+
+// ==============================================
+// NOTIFICAÇÕES
+// ==============================================
+
+model Notification {
+  id          String             @id @default(cuid())
+  studentId   String?
+  type        NotificationType
+  channel     NotificationChannel
+  title       String
+  body        String             @db.Text
+  sentAt      DateTime?
+  error       String?
+  createdAt   DateTime           @default(now())
+
+  @@map("notifications")
+}
+
+enum NotificationType {
+  PAYMENT_DUE
+  PAYMENT_OVERDUE
+  PAYMENT_CONFIRMED
+  CLASS_REMINDER
+  GENERAL
+}
+
+enum NotificationChannel {
+  EMAIL
+  WHATSAPP
+}
